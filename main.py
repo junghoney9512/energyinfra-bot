@@ -71,7 +71,7 @@ report_text += "🌐 [MACRO DASHBOARD]\n"
 for m_sym, m_name in MACRO_INDICATORS.items():
     try:
         m_df = yf.Ticker(m_sym).history(period="35d")
-        if len(m_df) >= 2;
+        if len(m_df) >= 2:
             curr = m_df['Close'].iloc[-1]
             d1 = ((curr - m_df['Close'].iloc[-2]) / m_df['Close'].iloc[-2]) * 100
             report_text += f"📍 {m_name:8} : {curr:>8.2f} ({d1:>+6.2f}%)\n"
