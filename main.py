@@ -10,7 +10,8 @@ CHAT_ID = os.getenv('CHAT_ID')
 
 def send_report(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+    # 고정폭 느낌을 주기 위해 HTML의 <code> 태그를 활용합니다.
+    payload = {"chat_id": CHAT_ID, "text": f"<code>{text}</code>", "parse_mode": "HTML"}
     requests.post(url, data=payload)
 
 def get_pct(curr, prev):
@@ -18,32 +19,34 @@ def get_pct(curr, prev):
     return ((curr - prev) / prev) * 100
 
 STOCKS = ["KMI", "WMB", "LNG"]
-MACRO_MAP = {"NG=F": "천연", "^TNX": "미10", "DX-Y.NYB": "달러", "^GSPC": "S&P", "CL=F": "WTI"}
+# 텍스트 밀림 방지를 위해 매크로 이름을 2글자로 통일
+MACRO_MAP = {"NG=F": "가스", "^TNX": "금리", "DX-Y.NYB": "달러", "^GSPC": "S&P", "CL=F": "원유"}
 
-report = f"<b>🏛️ 에너지 인프라 통합 리서치 터미널 (Final Mastery)</b>\n"
-report += f"기준: {datetime.now().strftime('%m/%d %H:%M')}\n"
-report += "="*40 + "\n"
+now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+report = f"🏛️ ENERGY INFRA TERMINAL\n"
+report += f"DATE: {now_str}\n"
+report += "="*30 + "\n"
 
-# 1. 매크로 데이터 수집 및 연산 (NaN 방지 처리)
+# 1. 매크로 데이터 (수익률 연산 보정)
 macro_rets = {}
-macro_info = "<b>🌐 [MACRO DASHBOARD]</b>\n"
+report += "[🌐 MACRO DASHBOARD]\n"
 for sym, name in MACRO_MAP.items():
     try:
         t = yf.Ticker(sym)
         h = t.history(period="6mo")['Close']
-        if sym == "^TNX": # 금리는 변화량으로 계산 (NaN 방지)
-            macro_rets[sym] = h.diff().fillna(0)
+        if sym == "^TNX":
+            macro_rets[sym] = h.diff().fillna(0) # 금리는 단순 변화량
         else:
             macro_rets[sym] = h.pct_change().fillna(0)
             
-        c, p, w = h.iloc[-1], h.iloc[-2], h.iloc[-6]
-        macro_info += f"📍 {name:3}: {c:7.2f} | 1D:{get_pct(c,p):+6.2f}% | 1W:{get_pct(c,w):+6.2f}%\n"
-    except: macro_info += f"📍 {name:3}: 데이터 지연\n"
+        c, p = h.iloc[-1], h.iloc[-2]
+        report += f"{name:4}: {c:7.2f} ({get_pct(c,p):+6.2f}%)\n"
+    except: report += f"{name:4}: Data Error\n"
 
-report += macro_info + "-"*40 + "\n"
+report += "-"*30 + "\n"
 
-# 2. 종목 심층 분석
-report += "<b>📈 [EQUITY RESEARCH: 분석 지표]</b>\n"
+# 2. 종목 분석
+report += "[📈 EQUITY RESEARCH]\n"
 for s in STOCKS:
     try:
         t = yf.Ticker(s)
@@ -53,46 +56,44 @@ for s in STOCKS:
         c = df.iloc[-1]
         ret = df.pct_change().fillna(0)
         
-        # 밸류/의견/RSI
+        # 기본 지표
         upside = get_pct(info.get('targetMeanPrice', c), c)
-        opinion = "STRONG_BUY" if upside > 20 else "BUY" if upside > 5 else "HOLD"
-        
         delta = df.diff()
         gain = delta.clip(lower=0).rolling(14).mean()
         loss = (-delta.clip(upper=0)).rolling(14).mean()
         rsi = 100 - (100 / (1 + (gain.iloc[-1] / (loss.iloc[-1] + 1e-9))))
         
-        report += f"<b>📊 {s}</b> | 시총: ${info.get('marketCap',0)/1e9:.1f}B | 현재가: ${c:.2f}\n"
-        report += f"  ├─ [밸류/목표] EV/EBITDA: {info.get('enterpriseToEbitda','N/A')}배 | Upside: {upside:+.1f}% | 의견: {opinion}\n"
-        report += f"  ├─ [펀더멘탈] 부채/EBITDA: {info.get('debtToEquity',0)/100:.1f}배 | ROE: {info.get('returnOnEquity',0)*100:.1f}%\n"
-        
         div = info.get('dividendYield', 0)
-        if div > 1: div /= 100 # 배당률 100배 오차 수정
-        report += f"  ├─ [기술/배당] RSI: {rsi:.1f} | 배당률: {div*100:.2f}%\n"
+        if div > 1: div /= 100 # 배당 오차 수정
+
+        report += f"● {s:3} | Price: ${c:.2f}\n"
+        report += f"├ Value: EV {info.get('enterpriseToEbitda','N/A')}배 | UP {upside:+.1f}%\n"
+        report += f"├ Funda: Debt {info.get('debtToEquity',0)/100:.1f} | ROE {info.get('returnOnEquity',0)*100:.1f}%\n"
+        report += f"├ Tech : RSI {rsi:.1f} | Div {div*100:.1f}%\n"
         
-        # 상관관계 & 베타 (NaN 강제 0.00 처리)
-        corr_line, beta_line = "  ├─ [상관관계] ", "  ├─ [민감도(β)] "
+        # 상관관계 & 베타 (한 줄 정렬을 위해 짧게 표기)
+        corr_line = "├ Corr : "
+        beta_line = "└ Beta : "
         for m_sym, m_name in MACRO_MAP.items():
             m_ret = macro_rets.get(m_sym, pd.Series(0, index=ret.index))
-            corr = ret.corr(m_ret)
-            beta = ret.cov(m_ret) / (m_ret.var() + 1e-9)
+            combined = pd.concat([ret, m_ret], axis=1).dropna()
             
-            # NaN 체크 및 출력
-            corr_val = 0.00 if np.isnan(corr) else corr
-            beta_val = 0.00 if np.isnan(beta) else beta
-            corr_line += f"{m_name}:{corr_val:+.2f} "
-            beta_line += f"{m_name}:{beta_val:+.2f} "
+            corr = combined.iloc[:,0].corr(combined.iloc[:,1])
+            beta = combined.iloc[:,0].cov(combined.iloc[:,1]) / (combined.iloc[:,1].var() + 1e-9)
+            
+            # NaN은 0으로 강제 변환
+            corr = 0 if np.isnan(corr) else corr
+            beta = 0 if np.isnan(beta) else beta
+            
+            # 가독성을 위해 기호 제외하고 수치만 간결하게
+            corr_line += f"{corr:+.1f} "
+            beta_line += f"{beta:+.1f} "
         
-        report += corr_line.strip() + "\n" + beta_line.strip() + "\n"
+        report += corr_line.strip() + "\n"
+        report += beta_line.strip() + "\n"
+        report += "."*30 + "\n"
         
-        # 뉴스 우회 호출
-        news_title = "최신 공시 및 뉴스 확인 필요"
-        if t.news:
-            news_title = t.news[0].get('title', news_title)
-        report += f"  └─ [최신뉴스] {news_title[:45]}...\n"
-        report += "-"*40 + "\n"
-        
-    except Exception as e:
-        report += f"⚠️ {s} 데이터 분석 오류\n"
+    except Exception:
+        report += f"⚠️ {s} Analysis Error\n"
 
 send_report(report)
