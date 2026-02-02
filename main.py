@@ -17,75 +17,65 @@ def get_pct(curr, prev):
     if not prev or prev == 0: return 0
     return ((curr - prev) / prev) * 100
 
+# 1. 설정
 STOCKS = ["KMI", "WMB", "LNG"]
-MACRO_SYMS = {"NG=F": "천연가스", "^TNX": "10년금리", "DX-Y.NYB": "달러인덱스", "^GSPC": "S&P500", "CL=F": "WTI원유"}
+MACRO_MAP = {"NG=F": "천연", "^TNX": "미10", "DX-Y.NYB": "달러", "^GSPC": "S&P", "CL=F": "WTI"}
 
-# 1. 매크로 데이터
-macro_info = ""
-macro_returns = {}
-for sym, name in MACRO_SYMS.items():
-    try:
-        t = yf.Ticker(sym)
-        h = t.history(period="6mo")
-        curr, prev = h['Close'].iloc[-1], h['Close'].iloc[-2]
-        macro_returns[sym] = h['Close'].pct_change().dropna()
-        macro_info += f"• {name}: {curr:.2f} ({get_pct(curr, prev):+.2f}%)\n"
-    except: macro_info += f"• {name}: 데이터 지연\n"
+report = f"🏛️ <b>에너지 인프라 통합 리서치 터미널 (Final Mastery)</b>\n"
+report += f"기준: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+report += "="*40 + "\n"
 
-report = f"<b>🏛 [에너지 전략 대시보드 - FINAL]</b>\n{datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-report += f"<b>🌐 매크로 상황</b>\n{macro_info}"
+# 2. 매크로 데이터 연산
+macro_rets = {}
+macro_info = "<b>🌐 [MACRO DASHBOARD]</b>\n"
+for sym, name in MACRO_MAP.items():
+    t = yf.Ticker(sym)
+    h = t.history(period="6mo")
+    macro_rets[sym] = h['Close'].pct_change().dropna()
+    c, p = h['Close'].iloc[-1], h['Close'].iloc[-2]
+    w, m = h['Close'].iloc[-6], h['Close'].iloc[-22]
+    macro_info += f"📍 {name:3}: {c:7.2f} | 1D:{get_pct(c,p):+6.2f}% | 1W:{get_pct(c,w):+6.2f}%\n"
 
-# 2. 종목 분석
+report += macro_info + "-"*40 + "\n"
+
+# 3. 종목 분석
+report += "<b>📈 [EQUITY RESEARCH: 펀더멘탈/상관성/베타]</b>\n"
 for s in STOCKS:
     try:
         t = yf.Ticker(s)
         df = t.history(period="6mo")
-        info = t.info if t.info else {}
+        info = t.info
+        c = df['Close'].iloc[-1]
+        ret = df['Close'].pct_change().dropna()
         
-        curr = df['Close'].iloc[-1]
-        d1 = get_pct(curr, df['Close'].iloc[-2])
-        w1 = get_pct(curr, df['Close'].iloc[-6])
-        m1 = get_pct(curr, df['Close'].iloc[-22])
-        
-        # 지표 추출 및 보정
-        ev_ebitda = info.get('enterpriseToEbitda', 'N/A')
-        roe = info.get('returnOnEquity', 0) * 100
-        debt_ebitda = info.get('debtToEquity', 0) / 100
-        
-        # 배당률 보정 (너무 크면 100으로 나눔)
-        div = info.get('dividendYield', 0) * 100
-        if div > 50: div = div / 100 
-        
-        target = info.get('targetMeanPrice', curr)
-        
-        # 기술 지표
-        returns = df['Close'].pct_change().dropna()
+        # 지표 계산
         rsi = (df['Close'].diff().gt(0).rolling(14).sum().iloc[-1] / 14) * 100
+        rsi_tag = "⚠️ 과매수" if rsi > 70 else "❄️ 과매도" if rsi < 30 else "HOLD"
+        upside = get_pct(info.get('targetMeanPrice', c), c)
+        opinion = "STRONG_BUY" if upside > 20 else "BUY" if upside > 5 else "HOLD"
         
-        # 상관관계/베타
-        spy_ret = macro_returns.get("^GSPC", pd.Series())
-        ng_ret = macro_returns.get("NG=F", pd.Series())
-        beta = returns.cov(spy_ret) / spy_ret.var() if not spy_ret.empty else 0
-        corr_ng = returns.corr(ng_ret) if not ng_ret.empty else 0
-
-        report += f"\n<b>📊 {s} (${info.get('marketCap', 0)/1e9:.1f}B)</b>\n"
-        report += f"<b>주가:</b> ${curr:.2f} (1D:{d1:+.1f}% | 1W:{w1:+.1f}% | 1M:{m1:+.1f}%)\n"
-        report += f"<b>밸류:</b> EV/EBITDA {ev_ebitda} | 목표대비 {get_pct(target, curr):+.1f}%\n"
-        report += f"<b>펀더:</b> 부채비율 {debt_ebitda:.1f} | ROE {roe:.1f}%\n"
-        report += f"<b>지표:</b> RSI {rsi:.1f} | 배당률 {div:.1f}%\n"
-        report += f"<b>민감:</b> Beta {beta:.2f} | 가스상관 {corr_ng:.2f}\n"
+        report += f"<b>📊 {s}</b> | 시총: ${info.get('marketCap',0)/1e9:.2f}B | 현재가: ${c:.2f}\n"
+        report += f"  ├─ [밸류/목표] EV/EBITDA: {info.get('enterpriseToEbitda','N/A')}배 | Upside: {upside:+.2f}% | 의견: {opinion}\n"
+        report += f"  ├─ [펀더멘탈] 부채/EBITDA: {info.get('debtToEquity',0)/100:.2f}배 | ROE: {info.get('returnOnEquity',0)*100:.1f}%\n"
+        report += f"  ├─ [기술/배당] RSI: {rsi:.1f} ({rsi_tag}) | 배당률: {info.get('dividendYield',0)*100:.2f}%\n"
         
-        # 뉴스 (가장 안전한 방식)
-        try:
-            news = t.news[:2]
-            if news:
-                report += "<b>📰 뉴스:</b>\n"
-                for n in news:
-                    title = n.get('title', '').replace('<', '').replace('>', '') # 기호 제거
-                    report += f" - {title[:35]}..\n"
-        except: pass
-            
-    except:
-        report += f"\n⚠️ {s}: 데이터 구성 중 일부 누락\n"
+        # 상관관계 & 베타 연산
+        corr_str, beta_str = "  ├─ [상관관계] ", "  ├─ [민감도(β)] "
+        for m_sym, m_name in MACRO_MAP.items():
+            m_ret = macro_rets[m_sym]
+            corr = ret.corr(m_ret)
+            beta = ret.cov(m_ret) / m_ret.var()
+            corr_str += f"{m_name}:{corr:+.2f} "
+            beta_str += f"{m_name}:{beta:+.2f} "
+        
+        report += corr_str + "\n" + beta_str + "\n"
+        
+        # 뉴스
+        news = t.news[0].get('title', 'N/A') if t.news else "N/A"
+        report += f"  └─ [최신뉴스] {news[:50]}...\n"
+        report += "-"*40 + "\n"
+        
+    except Exception as e:
+        report += f"⚠️ {s} 데이터 연산 오류\n"
 
 send_report(report)
