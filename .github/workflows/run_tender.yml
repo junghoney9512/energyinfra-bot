@@ -20,4 +20,4 @@ jobs:
           SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python main.py
+        run: python tender_bot.py
