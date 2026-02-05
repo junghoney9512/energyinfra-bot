@@ -1,0 +1,23 @@
+name: US Tender Hourly Bot
+on:
+  schedule:
+    - cron: '0 * * * *' # 매 시 정각에 실행 (1시간 주기)
+  workflow_dispatch: # 언제든 수동 실행 가능
+
+jobs:
+  run_bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run Script
+        env:
+          SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python main.py
