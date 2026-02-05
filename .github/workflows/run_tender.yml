@@ -1,23 +1,43 @@
 name: US Tender Hourly Bot
 on:
   schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *' # 매 시 정각 실행
+  workflow_dispatch: # 수동 실행 가능
 
 jobs:
   run_bot:
     runs-on: ubuntu-latest
+    # 봇이 파일을 수정해서 다시 올릴 수 있도록 권한을 부여합니다.
+    permissions:
+      contents: write
+      
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
       - name: Install dependencies
-        run: pip install requests  # 3호 봇은 이것만 있으면 됩니다.
-      - name: Run Script
+        run: pip install requests
+
+      - name: Run Tender Script
         env:
           SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python tender_bot.py  # <--- 여기가 중요! 1호 봇(main.py)과 이름이 달라야 함
+        run: python tender_bot.py
+
+      # [중복 방지 핵심] 새로 확인한 공고 ID 리스트를 GitHub에 다시 저장합니다.
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.email "bot@github.com"
+          git config --global user.name "Tender Bot"
+          # 파일이 새로 생겼거나 수정되었다면 추가
+          if [ -f last_seen_tenders.txt ]; then
+            git add last_seen_tenders.txt
+            # 변경사항이 있을 때만 커밋 (없으면 스킵)
+            git diff --quiet && git diff --staged --quiet || (git commit -m "Update last seen tenders [skip ci]" && git push)
+          fi
