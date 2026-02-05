@@ -7,53 +7,74 @@ SAM_API_KEY = os.getenv("SAM_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
+# 이미 보낸 공고를 기억할 파일 이름
+DB_FILE = "last_seen_tenders.txt"
+
 def get_tenders():
-    # 오늘 날짜로 설정
+    # 1. 이미 보낸 공고 ID들 불러오기
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            sent_ids = set(f.read().splitlines())
+    else:
+        sent_ids = set()
+
     now = datetime.utcnow()
     today = now.strftime("%Y-%m-%d")
-    
-    # SAM.gov API 주소
     url = "https://api.sam.gov/opportunities/v2/search"
     
-    # 테스트를 위해 파라미터를 최소화 (오늘 등록된 모든 공고 10개만 가져오기)
+    target_agencies = ["DEPT OF DEFENSE", "DEPARTMENT OF ENERGY", "NATIONAL AERONAUTICS AND SPACE ADMINISTRATION"]
+    
     params = {
         "api_key": SAM_API_KEY,
         "postedFrom": today,
         "postedTo": today,
-        "limit": 10  # 일단 10개만 테스트
+        "limit": 100
     }
     
-    print(f"{today} 날짜로 공고를 조회합니다...")
     response = requests.get(url, params=params)
     data = response.json()
     
     results = []
+    new_sent_ids = []
     
-    # [수정] 모든 기관, 모든 길이의 공고를 다 허용하도록 필터 제거
     for opp in data.get("opportunitiesData", []):
-        title = opp.get("title")
-        agency = opp.get("fullParentPathName", "기관 정보 없음")
-        link = opp.get("uiLink", "No Link")
+        notice_id = opp.get("noticeId") # 공고 고유 ID
         
-        # 아무 조건 없이 무조건 추가
-        results.append(f"🏛 <b>기관:</b> {agency}\n🚀 <b>건명:</b> {title}\n🔗 <a href='{link}'>공고 상세보기</a>")
+        # 중복 체크: 이미 보낸 ID라면 건너뛰기
+        if notice_id in sent_ids:
+            continue
             
+        agency_name = opp.get("fullParentPathName", "").upper()
+        if any(target in agency_name for target in target_agencies):
+            title = opp.get("title")
+            description = opp.get("description", "")
+            link = opp.get("uiLink", "No Link")
+            
+            # 대형 공고 필터 (설명 200자 이상)
+            if len(description) >= 200:
+                results.append(f"🏛 <b>기관:</b> {opp.get('fullParentPathName')}\n🚀 <b>건명:</b> {title}\n🔗 <a href='{link}'>공고 상세보기</a>")
+                new_sent_ids.append(notice_id)
+    
+    # 2. 새로 보낸 공고 ID 저장하기
+    if new_sent_ids:
+        with open(DB_FILE, "a") as f:
+            for n_id in new_sent_ids:
+                f.write(n_id + "\n")
+                
     return results
 
 def send_telegram(messages):
     if not messages:
-        # 공고가 하나도 없을 때도 알림이 오는지 테스트하기 위해 메시지 전송
-        messages = ["현재 오늘 날짜로 등록된 공고가 하나도 없습니다. (서버 정상 작동 중)"]
+        return
         
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    header = "<b>🧪 3호 봇 작동 테스트 중</b>\n"
-    header += "필터를 해제하여 오늘 등록된 공고를 무조건 가져옵니다.\n" + "="*25 + "\n\n"
+    header = "<b>🔔 [신규] 미 정부 대형 입찰 알림</b>\n"
+    header += "대상: 국방부, 에너지부, NASA\n" + "="*25 + "\n\n"
     
-    full_msg = header + "\n\n".join(messages[:5]) # 너무 많을 수 있으니 상위 5개만
+    full_msg = header + "\n\n".join(messages)
     
     payload = {"chat_id": CHAT_ID, "text": full_msg, "parse_mode": "HTML"}
-    r = requests.post(url, data=payload)
-    print(f"텔레그램 전송 결과: {r.status_code}")
+    requests.post(url, data=payload)
 
 if __name__ == "__main__":
     tenders = get_tenders()
